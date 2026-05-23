@@ -79,17 +79,53 @@ interface Token {
   trailing: string
 }
 
+/**
+ * Tokenize text into natural word + punctuation chunks.
+ * English words: grouped by [a-zA-Z0-9'] runs.
+ * Chinese characters: grouped into "words" of ~2-4 chars (natural keyword size).
+ * Mixed: each script type is handled separately.
+ */
 function tokenize(text: string): Token[] {
   const tokens: Token[] = []
   let i = 0
+
+  // CJK Unicode ranges: U+4E00–U+9FFF, U+3400–U+4DBF, U+F900–U+FAFF, U+20000–U+2FA1F
+  const isCJK = (ch: string) =>
+    (ch >= '一' && ch <= '鿿') ||
+    (ch >= '㐀' && ch <= '䶿') ||
+    (ch >= '豈' && ch <= '﫿')
+
   while (i < text.length) {
+    const ch = text[i]
+    const cjk = isCJK(ch)
+
+    // If first char is CJK, read 2-4 CJK chars as one "word"
+    if (cjk) {
+      let end = i
+      while (end < text.length && isCJK(text[end]) && end - i < 4) {
+        end++
+      }
+      // Trim trailing CJK if it would be a single char (avoid single-char tokens)
+      const word = text.slice(i, end)
+      let trailingEnd = end
+      while (trailingEnd < text.length && !isCJK(text[trailingEnd]) && !/[a-zA-Z0-9']/.test(text[trailingEnd])) {
+        trailingEnd++
+      }
+      const trailing = text.slice(end, trailingEnd)
+      if (word) tokens.push({ text: word, trailing })
+      i = trailingEnd
+      if (i === end && i === text.length) break
+      continue
+    }
+
+    // English/alphanumeric word
     let wordEnd = i
     while (wordEnd < text.length && /[a-zA-Z0-9']/.test(text[wordEnd])) {
       wordEnd++
     }
     const word = text.slice(i, wordEnd)
     let trailingEnd = wordEnd
-    while (trailingEnd < text.length && !/[a-zA-Z0-9']/.test(text[trailingEnd])) {
+    while (trailingEnd < text.length && !/[a-zA-Z0-9']/.test(text[trailingEnd]) && !isCJK(text[trailingEnd])) {
       trailingEnd++
     }
     const trailing = text.slice(wordEnd, trailingEnd)
@@ -97,5 +133,6 @@ function tokenize(text: string): Token[] {
     i = trailingEnd
     if (i === wordEnd && i === text.length) break
   }
+
   return tokens
 }

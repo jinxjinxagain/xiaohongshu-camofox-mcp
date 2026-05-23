@@ -226,8 +226,9 @@ export function extractFeedsFromSnapshot(
       el.role === 'link' &&
       el.name &&
       el.name.length > 5 &&
+      el.name.length < 200 &&
       !el.name?.toLowerCase().includes('search') &&
-      !el.name?.toLowerCase().includes('发现') === false,
+      !el.name?.toLowerCase().includes('发现'),
   )
 
   for (let i = 0; i < Math.min(limit, feedLinks.length); i++) {
@@ -263,35 +264,51 @@ function extractUrlFromElement(el: SnapshotElement): string {
 /** Try to parse feeds from accessibility tree (XHS renders as text). */
 function tryParseFeedsFromTree(tree: string, limit: number): FeedItem[] {
   const items: FeedItem[] = []
-  // XHS accessibility tree format: user entries have patterns like "用户名 · 笔记数"
   const lines = tree.split('\n')
-  let captureNext = false
-  let currentTitle = ''
 
   for (const line of lines) {
-    if (captureNext && items.length >= limit) break
+    if (items.length >= limit) break
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.length > 200) continue
+    if (trimmed.includes('搜索') || trimmed.includes('发现') || trimmed.includes('点赞') || trimmed.includes('收藏')) continue
 
-    // Look for author + note count pattern (common XHS profile entry)
-    const profileMatch = line.match(/^(.+?)\s*·\s*(\d+)\s*笔记/)
+    // Pattern A: profile entry "用户名 · N笔记"
+    const profileMatch = trimmed.match(/^(.+?)\s*·\s*(\d+)\s*笔记/)
     if (profileMatch) {
       items.push({
         id: `profile-${items.length}`,
-        title: `${profileMatch[1]} · ${profileMatch[2]}笔记`,
+        title: trimmed,
         url: '',
         rank: items.length + 1,
-        user: { name: profileMatch[1] },
+        user: { name: profileMatch[1].trim() },
       })
       continue
     }
 
-    // Look for feed-like titles
-    if (line.trim().length > 5 && line.trim().length < 200 && !line.includes('搜索') && !line.includes('发现')) {
-      if (!items.find((i) => i.title === line.trim())) {
-        currentTitle = line.trim()
-        captureNext = true
+    // Pattern B: note title near a note count badge "· N"
+    const noteTitleMatch = trimmed.match(/^(.+?)\s*·\s*(\d+)\s*(?:赞|收藏|评论)/)
+    if (noteTitleMatch) {
+      items.push({
+        id: `note-${items.length}`,
+        title: noteTitleMatch[1].trim(),
+        url: '',
+        rank: items.length + 1,
+      })
+      continue
+    }
+
+    // Pattern C: standalone title line (CJK chars, reasonable length, non-generic)
+    // Must have CJK chars to avoid nav/menu text
+    if (/[一-鿿]/.test(trimmed) && trimmed.length >= 4 && trimmed.length <= 100) {
+      // Avoid duplicate titles
+      if (!items.find((i) => i.title === trimmed)) {
+        items.push({
+          id: `title-${items.length}`,
+          title: trimmed,
+          url: '',
+          rank: items.length + 1,
+        })
       }
-    } else {
-      captureNext = false
     }
   }
 
