@@ -157,7 +157,13 @@ export class CamofoxClient {
     const qs = params.toString()
     const path = `/tabs/${encodeURIComponent(tabId)}/snapshot${qs ? `?${qs}` : ''}`
     const body = await this.request<CamofoxEnvelope<SnapshotData>>(path, { method: 'GET' })
-    return (body as unknown as SnapshotData) ?? { url: '' }
+    const raw = (body as unknown as SnapshotData) ?? { url: '' }
+    // Camofox returns raw text as `snapshot` field; map it to `accessibilityTree`
+    // so downstream code that reads `accessibilityTree` gets the data.
+    if (raw.snapshot && !raw.accessibilityTree) {
+      return { ...raw, accessibilityTree: raw.snapshot }
+    }
+    return raw
   }
 
   // ── HTTP layer ──────────────────────────────────────────────────────────────

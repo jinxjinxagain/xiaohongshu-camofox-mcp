@@ -88,6 +88,9 @@ export interface SnapshotData {
   url: string
   title?: string
   elements?: SnapshotElement[]
+  /** Raw text snapshot (Camofox default format, also used as accessibility tree). */
+  snapshot?: string
+  /** Explicit accessibility tree (only set when format=accessibility is requested). */
   accessibilityTree?: string
   screenshot?: string
 }
