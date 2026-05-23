@@ -331,28 +331,49 @@ export async function getFeedDetail(
  * Simple "换线" content classifier.
  * Keywords: 换线/新线/首攀/新开/红点/定级
  * Negative patterns: 磕了很久/终于完成/个人完攀 (personal achievement)
+ *
+ * Edge cases:
+ * - Title has positive keyword but body is short (<20 chars) or emoji-only
+ *   → likely a short announcement post, count as change line
+ * - Body has negative patterns → not change line (personal achievement post)
  */
 export function classifyChangeLinePost(title: string, body: string): {
   is_change_line: boolean
   keywords_matched: string[]
   reason: string
 } {
-  const text = `${title} ${body}`.toLowerCase()
+  const titleText = title.toLowerCase()
+  const bodyText = body.toLowerCase()
+  const combinedText = `${titleText} ${bodyText}`
+
   const positive = ['换线', '新线', '首攀', '新开', '红点', '定级', '新攀', '红线']
   const negative = ['磕了很久', '终于完成', '个人完攀', '抱石日志', '日常训练']
 
-  const matched = positive.filter((kw) => text.includes(kw))
-  const has_negative = negative.some((nw) => text.includes(nw))
-
-  if (matched.length === 0) {
+  const titleMatched = positive.filter((kw) => titleText.includes(kw))
+  if (titleMatched.length === 0) {
     return { is_change_line: false, keywords_matched: [], reason: 'no_change_line_keywords' }
   }
+
+  // Check negative patterns in full text
+  const has_negative = negative.some((nw) => combinedText.includes(nw))
   if (has_negative) {
-    return { is_change_line: false, keywords_matched: matched, reason: 'negative_pattern_detected' }
+    return { is_change_line: false, keywords_matched: titleMatched, reason: 'negative_pattern_detected' }
   }
+
+  // Edge case: short body (emoji/empty) + title has positive keyword → likely short announcement
+  const bodyLen = body.trim().length
+  if (bodyLen < 20) {
+    // Count as change line if body is very short (announcement style)
+    return {
+      is_change_line: true,
+      keywords_matched: titleMatched,
+      reason: 'title_positive_short_body_likely_announcement',
+    }
+  }
+
   return {
     is_change_line: true,
-    keywords_matched: matched,
+    keywords_matched: titleMatched,
     reason: 'change_line_keywords_detected',
   }
 }
