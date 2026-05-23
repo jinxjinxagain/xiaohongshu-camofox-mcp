@@ -11,7 +11,7 @@ import { globalRunLimiter } from '../safety/runLimiter.js'
 import { auditLog } from '../audit/log.js'
 import { humanType } from '../human/keyboard.js'
 import { humanClick } from '../human/mouse.js'
-import { waitAfterNavigation, thinkPause } from '../human/timing.js'
+import { sleep, waitAfterNavigation, thinkPause } from '../human/timing.js'
 import { CamofoxClient } from '../camofox/client.js'
 import {
   waitForXhsStable,
@@ -150,11 +150,20 @@ export async function searchFeeds(
       actions.push('human_type_keyword')
 
       await thinkPause()
-      await waitAfterNavigation()
-    }
 
-    finalUrl = (await client.snapshot(tabId, { userId })).url ?? finalUrl
-    actions.push('wait_search_results')
+      // Wait for search results to load — XHS redirects to /search_result URL
+      // Poll URL until it contains 'search_result' (max 20s)
+      for (let wait = 0; wait < 20; wait++) {
+        const currentUrl = (await client.snapshot(tabId, { userId })).url ?? ''
+        if (currentUrl.includes('/search_result')) {
+          finalUrl = currentUrl
+          actions.push('wait_search_results')
+          break
+        }
+        await sleep(1000)
+        if (wait === 19) actions.push('wait_search_results_timeout')
+      }
+    }
 
     // Step 5: Natural scroll (1-2 times)
     const scrollCount = input.filters?.note_type === 'video' ? 1 : 2
