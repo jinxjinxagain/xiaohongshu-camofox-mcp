@@ -62,6 +62,8 @@ export async function findAndClickSearchBox(
     'header input[type="search"]',
     '[class*="search"] input',
     '[class*="Search"] input',
+    'input[type="search"]',
+    'input[aria-label*="搜索"]',
   ]
 
   for (const selector of cssSelectors) {
@@ -76,14 +78,20 @@ export async function findAndClickSearchBox(
         ctx.userId,
       )
       if (found === true) {
-        // Return a synthetic element with the CSS selector as ref
-        // Camofox /click accepts both 'ref' (accessibility ref) and 'selector' (CSS selector)
+        // Found and focused: click to open search UI, then type
+        await client.click(ctx.tabId, { userId: ctx.userId, selector })
+        await waitAfterClick()
         return { ref: selector, role: 'textbox', name: 'search-input' }
       }
-    } catch {
-      // continue to next selector
+    } catch (err) {
+      // Log individual selector failures for debugging
+      console.error(`[findAndClickSearchBox] selector "${selector}" failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
+
+  // Log snapshot info for debugging
+  const allEls = (snapshot.elements ?? []).map((el) => `${el.role} "${el.name ?? ''}" desc="${(el.description ?? '').slice(0, 50)}"`).slice(0, 20)
+  console.error(`[findAndClickSearchBox] No search box found. Elements (first 20):`, allEls)
 
   return null
 }
