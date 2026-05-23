@@ -37,9 +37,12 @@ export async function humanType(
   let charsSincePause = 0
 
   for (const token of tokens) {
+    // Pass as selector if elementRef looks like a CSS selector (contains CSS-specific chars)
+    const isCssSelector = /[\[\]().#:]/.test(elementRef)
     await client.type(tabId, {
       userId,
-      ref: elementRef,
+      ref: isCssSelector ? undefined : elementRef,
+      selector: isCssSelector ? elementRef : undefined,
       text: token.text,
       clear: charsSincePause === 0 ? clear : false,
     })

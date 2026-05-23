@@ -43,13 +43,49 @@ export async function findAndClickSearchBox(
   ctx: XhsNavigationContext,
 ): Promise<SnapshotElement | null> {
   const snapshot = await client.snapshot(ctx.tabId, { userId: ctx.userId })
-  // Look for search input or search button
+
+  // Try accessibility-based search box detection first
   const searchBox = findSearchBoxElement(snapshot)
   if (searchBox) {
     await humanClick(client, ctx.tabId, ctx.userId, searchBox.ref)
     await waitAfterClick()
+    return searchBox
   }
-  return searchBox
+
+  // Fallback: use CSS selector via evaluate to find and click search input
+  const cssSelectors = [
+    'input[placeholder*="搜索"]',
+    'input[placeholder*="search"]',
+    'input[placeholder*="Search"]',
+    '[data-vane="search-input"]',
+    '.search-input input',
+    'header input[type="search"]',
+    '[class*="search"] input',
+    '[class*="Search"] input',
+  ]
+
+  for (const selector of cssSelectors) {
+    try {
+      const found = await client.evaluate(
+        ctx.tabId,
+        `(() => {
+          const el = document.querySelector('${selector}')
+          if (el) { el.focus(); return true }
+          return false
+        })()`,
+        ctx.userId,
+      )
+      if (found === true) {
+        // Return a synthetic element with the CSS selector as ref
+        // Camofox /click accepts both 'ref' (accessibility ref) and 'selector' (CSS selector)
+        return { ref: selector, role: 'textbox', name: 'search-input' }
+      }
+    } catch {
+      // continue to next selector
+    }
+  }
+
+  return null
 }
 
 /** Find search box in snapshot elements. */

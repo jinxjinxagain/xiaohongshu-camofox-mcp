@@ -32,9 +32,13 @@ export async function humanClick(
   // Pre-click hover dwell
   await sleep(randInt(hoverBeforeMs[0], hoverBeforeMs[1]))
 
+  // Detect if elementRef is a CSS selector
+  const isCssSelector = /[\[\]().#:]/.test(elementRef)
+
   await client.click(tabId, {
     userId,
-    ref: elementRef,
+    ref: isCssSelector ? undefined : elementRef,
+    selector: isCssSelector ? elementRef : undefined,
     doubleClick,
   })
 
