@@ -48,21 +48,31 @@ export async function findAndClickSearchBox(
   const rawTree = snapshot.accessibilityTree ?? ''
   const elements = snapshot.elements ?? []
 
-  // Priority 1: parse raw text snapshot for textbox "搜索小红书" [eN]
-  const textboxMatch = rawTree.match(/textbox\s+"[^"]*搜索[^"]*"\s+\[([^\]]+)\]/)
+  // Priority 1: parse raw text snapshot for XHS search textbox
+  // XHS uses "搜索小红书" or "登录探索更多内容" as the search box name
+  const textboxMatch = rawTree.match(/textbox\s+"([^"]*(?:搜索|探索)[^"]*)"\s+\[([^\]]+)\]:?/)
   if (textboxMatch) {
-    const ref = textboxMatch[1]
-    await client.click(ctx.tabId, { userId: ctx.userId, ref })
-    await waitAfterClick()
-    return { ref, role: 'textbox', name: '搜索小红书' }
+    const ref = textboxMatch[2]
+    try {
+      await client.click(ctx.tabId, { userId: ctx.userId, ref })
+      await waitAfterClick()
+      return { ref, role: 'textbox', name: textboxMatch[1] }
+    } catch (err) {
+      // Click timed out — let the caller use fallback direct URL navigation
+      console.error(`[findAndClickSearchBox] click "${textboxMatch[1]}" timed out: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   // Priority 2: accessibility elements (fallback for non-XHS pages)
   const searchBox = findSearchBoxElement({ elements })
   if (searchBox) {
-    await humanClick(client, ctx.tabId, ctx.userId, searchBox.ref)
-    await waitAfterClick()
-    return searchBox
+    try {
+      await humanClick(client, ctx.tabId, ctx.userId, searchBox.ref)
+      await waitAfterClick()
+      return searchBox
+    } catch (err) {
+      console.error(`[findAndClickSearchBox] Priority-2 click timed out: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   // Priority 3: CSS selector fallback (only for non-XHS or hybrid pages)
@@ -275,31 +285,50 @@ function extractUrlFromElement(el: SnapshotElement): string {
 
 /** Try to parse feeds from accessibility tree / raw text snapshot.
  *
- * Camofox XHS snapshot format (text):
- *   - link "title text" [eN]:
- *     - /url: /user/profile/USER_ID?xsec_token=...
+ * Camofox XHS snapshot format:
+ *   - link [eN]:           ← note link (has URL but NO title text)
+ *     - /url: /search_result/NOTE_ID
  *     - img
- *     - text: timestamp or stats
+ *   - link "TITLE" [eN]: ← title link (has title but URL is in NEXT entry's /url)
+ *   - link [eN]:
+ *     - /url: /search_result/NOTE_ID
+ *     - img
+ *   - link "TITLE" [eN]: ← title link
+ *     - img
  *
- * Two patterns to match:
- * A. Search result note: link "TITLE" [eN]:\n  - /url: /search_result/NOTE_ID?xsec_token=...\n  - img
- * B. Search result profile: link "NAME" [eN]:\n  - /url: /user/profile/USER_ID?xsec_token=...\n  - img\n  - text: TIMESTAMP
+ * Pattern: `[eN]:` followed by `  - /url: /search_result/...` = note link.
+ * Previous non-empty non-image text = title candidate.
  */
 function tryParseFeedsFromTree(tree: string, limit: number): FeedItem[] {
-  const items: FeedItem[] = []
   const lines = tree.split('\n')
+  const items: FeedItem[] = []
 
+  let lastTitle = ''
   for (let i = 0; i < lines.length && items.length < limit; i++) {
     const line = lines[i]
-    // Match: link "TITLE" [eN]:
+
+    // Capture non-empty text that looks like a feed title (between image lines)
+    const textMatch = line.match(/^\s*-\s*text:\s*"([^"]+)"\s*$/)
+    if (textMatch) {
+      lastTitle = textMatch[1]
+      continue
+    }
+
+    // Skip image lines and empty links
+    const imgMatch = line.match(/^\s*-\s*img\s*$/)
+    const emptyLinkMatch = line.match(/^\s*-\s*link\s+\[([^\]]+)\]:\s*$/)
+    if (imgMatch || emptyLinkMatch) continue
+
+    // Match: link "TITLE" [eN]: — this is the title-bearing link
     const linkMatch = line.match(/^\s*-\s*link\s+"([^"]+)"\s+\[([^\]]+)\]:\s*$/)
     if (!linkMatch) continue
     const title = linkMatch[1].trim()
     const ref = linkMatch[2]
-    const url = extractUrlFromTreeLines(lines, i + 1)
-    if (!url) continue
 
-    // Skip generic nav/search links
+    // The URL for this link is in the NEXT entry (note link without title)
+    const url = extractUrlFromTreeLines(lines, i + 1)
+
+    // Skip nav/footer/generic links
     if (
       title.includes('搜索') ||
       title.includes('发现') ||
@@ -307,27 +336,30 @@ function tryParseFeedsFromTree(tree: string, limit: number): FeedItem[] {
       title.includes('发布') ||
       title.includes('通知') ||
       title.includes('创作中心') ||
-      title.length < 3
+      title.includes('赞') ||
+      title.includes('收藏') ||
+      title.includes('评论') ||
+      title.length < 3 ||
+      title.length > 200
     ) {
       continue
     }
 
-    // Only include note links (XHS notes), not user profile links.
-    // Profile links are useful for gym account discovery but not for feed results.
-    if (!url.includes('/search_result/')) continue
+    // Check if next lines contain a note URL (not profile URL)
+    const noteUrlMatch = extractUrlFromTreeLines(lines, i + 1)
+    if (!noteUrlMatch || !noteUrlMatch.includes('/search_result/')) continue
 
     items.push({
       id: ref,
       title,
-      url,
+      url: noteUrlMatch,
       rank: items.length + 1,
     })
   }
 
-  // Deduplicate by note ID (some notes appear twice in the tree)
+  // Deduplicate by note ID
   const seen = new Set<string>()
   return items.filter((item) => {
-    // Extract note ID from /search_result/NOTE_ID?xsec_token=...
     const noteId = item.url.split('/search_result/')[1]?.split('?')[0] ?? item.url
     if (seen.has(noteId)) return false
     seen.add(noteId)

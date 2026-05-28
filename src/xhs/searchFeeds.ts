@@ -136,23 +136,10 @@ export async function searchFeeds(
     // Step 3: Find and click search box
     const searchBox = await findAndClickSearchBox(client, { tabId, userId, url: finalUrl })
     if (!searchBox) {
-      // Try direct navigation as fallback (mark as direct_url)
+      // Fallback: navigate directly to search URL
       await client.navigate(tabId, { userId, url: `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}` })
       actions.push('fallback_direct_search_url')
-      await waitForXhsStable(client, tabId, userId)
-    } else {
-      actions.push('click_search_box')
-      await waitAfterNavigation()
-
-      // Step 4: Type keyword using human keyboard
-      const searchInputRef = searchBox.ref
-      await humanType(client, tabId, userId, keyword, searchInputRef, { submit: true })
-      actions.push('human_type_keyword')
-
-      await thinkPause()
-
-      // Wait for search results to load — XHS redirects to /search_result URL
-      // Poll URL until it contains 'search_result' (max 20s)
+      // Wait for search results to load — poll URL until it contains 'search_result' (max 20s)
       for (let wait = 0; wait < 20; wait++) {
         const currentUrl = (await client.snapshot(tabId, { userId })).url ?? ''
         if (currentUrl.includes('/search_result')) {
@@ -163,9 +150,36 @@ export async function searchFeeds(
         await sleep(1000)
         if (wait === 19) actions.push('wait_search_results_timeout')
       }
+    } else {
+      actions.push('click_search_box')
+      await waitAfterNavigation()
+      await waitAfterNavigation()
+
+      // Step 4: Type keyword using human keyboard
+      const searchInputRef = searchBox.ref
+      await humanType(client, tabId, userId, keyword, searchInputRef, { submit: true })
+      actions.push('human_type_keyword')
+
+      await thinkPause()
+
+      // Wait for search results to load — XHS takes 10-20s to redirect after submit
+      // Poll URL until it contains 'search_result' (max 25s)
+      for (let wait = 0; wait < 25; wait++) {
+        const currentUrl = (await client.snapshot(tabId, { userId })).url ?? ''
+        if (currentUrl.includes('/search_result')) {
+          finalUrl = currentUrl
+          actions.push('wait_search_results')
+          break
+        }
+        await sleep(1000)
+        if (wait === 24) actions.push('wait_search_results_timeout')
+      }
     }
 
     // Step 5: Natural scroll (1-2 times)
+    // Wait for XHS to fully render search results after URL redirect
+    await waitAfterNavigation()
+    await waitAfterNavigation()
     const scrollCount = input.filters?.note_type === 'video' ? 1 : 2
     for (let i = 0; i < scrollCount; i++) {
       await humanScroll(client, { tabId, userId, url: finalUrl }, 'down')

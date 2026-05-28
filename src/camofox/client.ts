@@ -137,8 +137,8 @@ export class CamofoxClient {
    */
   async evaluate(tabId: string, expression: string, userId: string): Promise<unknown> {
     const body = await this.request<CamofoxEnvelope<{ result: unknown }>>(
-      `/tabs/${encodeURIComponent(tabId)}/evaluate?userId=${encodeURIComponent(userId)}`,
-      { method: 'POST', body: { expression } },
+      `/tabs/${encodeURIComponent(tabId)}/evaluate`,
+      { method: 'POST', body: { expression, userId } },
     )
     return (body as unknown as { result?: unknown }).result
   }
